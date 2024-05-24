@@ -31,9 +31,3 @@ This FreeCAD Macro is distributed under the GNU General Public License v3.0 (GPL
 ## Credits
 This Macro was developed by Compound CAD to enhance the functionality of FreeCAD for users working with complex assemblies and designs. 
 """
-
-# Write the content to a README.md file
-with open("README.md", "w") as readme_file:
-    readme_file.write(readme_content)
-
-print("README file generated successfully!")
