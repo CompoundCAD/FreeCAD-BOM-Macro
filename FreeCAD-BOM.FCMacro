@@ -226,11 +226,7 @@ class BomGui(QDialog):
         # Enable drag and drop for column reordering
         self.table.horizontalHeader().setSectionsMovable(True)
 
-        # Connect column order change signal
-        self.table.horizontalHeader().sectionMoved.connect(self.handle_column_move)
 
-        # Connect cell change signal
-        self.table.cellChanged.connect(self.handle_cell_change)
 
         # Connect selection change signal for the BOM spreadsheet
         self.table.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
@@ -310,24 +306,7 @@ class BomGui(QDialog):
                         break
 
 
-    def restore_default_order(self):
-        self.table.setColumnCount(0)
-        self.table.setRowCount(0)
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['Name', 'Label', 'Quantity', 'Material'])
-        self.populate_table(self.bom_data)
-        self.restore_order_btn.setEnabled(False)  # Disable button after restoring defaults
-        self.changes_made = False  # Reset changes flag
 
-    def handle_column_move(self, logicalIndex, oldVisualIndex, newVisualIndex):
-        # Enable the "Restore Defaults" button when column order changes are made
-        self.changes_made = True
-
-    def handle_cell_change(self, row, column):
-        # Enable the "Restore Defaults" button when changes are made in cells
-        if not self.changes_made:
-            self.restore_order_btn.setEnabled(True)
-            self.changes_made = True
 
     def show_column_management_dialog(self):
         dialog = ColumnManagementDialog(self.current_columns)
