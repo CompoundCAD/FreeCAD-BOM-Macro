@@ -147,12 +147,12 @@ class ColumnManagementDialog(QDialog):
 class BomGui(QDialog):
     def __init__(self, bom_data, selection_handler, parent=None):
         super(BomGui, self).__init__(parent)
-        self.bom_data = bom_data.copy()
+        self.original_bom_data = bom_data.copy()
+        self.filtered_bom_data = bom_data.copy()
         self.selection_handler = selection_handler
-        self.default_column_order = [0, 1, 2, 3]  # Store default column order
-        self.changes_made = False  # Flag to track changes
-        self.current_columns = ['Type', 'Name', 'Label', 'Quantity', 'Material']  # Store current columns
-
+        self.changes_made = False
+        self.current_columns = ['Type', 'Name', 'Label', 'Quantity', 'Material']
+        self.bom_data = bom_data.copy()  # Initialize bom_data attribute
         self.init_ui()
 
     def init_ui(self):
@@ -305,9 +305,7 @@ class BomGui(QDialog):
 
     def handle_column_move(self, logicalIndex, oldVisualIndex, newVisualIndex):
         # Enable the "Restore Defaults" button when column order changes are made
-        if not self.changes_made:
-            self.restore_order_btn.setEnabled(True)
-            self.changes_made = True
+        self.changes_made = True
 
     def handle_cell_change(self, row, column):
         # Enable the "Restore Defaults" button when changes are made in cells
