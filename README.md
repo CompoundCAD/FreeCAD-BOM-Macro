@@ -1,5 +1,7 @@
 # FreeCAD Bill of Materials (BOM) Macro
 
+<img src="https://github.com/CompoundCAD/FreeCAD-BOM-Macro/assets/170032786/0aee93e6-940f-408f-aa88-b14c28578019" alt="Screenshot 2024-05-24 113646" width="450">
+
 ## Overview
 This FreeCAD Macro generates a Bill of Materials (BOM) for your FreeCAD projects, providing a convenient way to organize and export information about the components and assemblies in your design.
 
