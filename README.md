@@ -1,5 +1,3 @@
-# Define the content of the README file
-readme_content = """
 # FreeCAD Bill of Materials (BOM) Macro
 
 ## Overview
