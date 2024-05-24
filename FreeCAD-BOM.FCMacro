@@ -156,7 +156,7 @@ class BomGui(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle('Bill of Materials')
+        self.setWindowTitle('Bill of Materials - CompoundCAD.com')
         self.setGeometry(100, 100, 800, 600)
         self.setMinimumWidth(600)
         self.setMaximumWidth(1000)
