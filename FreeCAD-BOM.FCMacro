@@ -1,10 +1,13 @@
+#CompoundCAD.com
+#Remote Design and Consulting
+
 import FreeCAD
 import FreeCADGui
 import csv
 from PySide2.QtWidgets import (
     QDialog, QPushButton, QTableWidget, QTableWidgetItem, QMenu,
     QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QApplication, QListWidget,
-    QListWidgetItem, QDialogButtonBox, QMessageBox, QLineEdit, QComboBox, QCheckBox, QFormLayout
+    QListWidgetItem, QDialogButtonBox, QLineEdit, QComboBox, QCheckBox, QFormLayout
 )
 from PySide2.QtCore import QObject, Signal, Slot, Qt
 
@@ -27,6 +30,7 @@ class SelectionHandler(QObject):
 class BomMacro:
     def __init__(self):
         self.selection_handler = SelectionHandler()
+        self.bom_gui = None  # Reference to the BOM GUI instance
 
     def is_valid_item(self, obj):
         valid_types = ['Part::Feature', 'App::Part', 'App::LinkGroup']
@@ -91,11 +95,8 @@ class BomMacro:
     def run(self):
         bom = self.generate_bom()
         if bom:
-            dialog = BomGui(bom, self.selection_handler)
-            if dialog.exec_():
-                print("BOM dialog closed.")
-            else:
-                print("BOM dialog canceled.")
+            self.bom_gui = BomGui(bom, self.selection_handler)
+            self.bom_gui.show()
         else:
             print("No BOM data generated.")
 
@@ -192,16 +193,11 @@ class BomGui(QDialog):
         button_layout.addWidget(self.cancel_btn)
         button_layout.addWidget(self.manage_columns_btn)  # Add manage columns button to layout
 
-        # Branding
-        branding_label = QLabel("Made by Compound CAD - CompoundCAD.com")
-        branding_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
-
         # Main layout
         main_layout = QVBoxLayout()  # Change to QVBoxLayout to align search layout on top
         main_layout.addLayout(search_layout)  # Add search layout to the main layout
         main_layout.addWidget(self.table)
         main_layout.addLayout(button_layout)  # Add button layout to the main layout
-        main_layout.addWidget(branding_label)
 
         # Set main layout
         self.setLayout(main_layout)
@@ -209,7 +205,7 @@ class BomGui(QDialog):
         # Connect button signals
         self.export_csv_btn.clicked.connect(self.export_csv)
         self.cancel_btn.clicked.connect(self.reject)
-        self.manage_columns_btn.clicked.connect(self.show_column_management_dialog)  # Connect manage columns button signal
+        self.manage_columns_btn.clicked.connect(self.show_column_management_dialog)
 
         # Enable drag and drop for column reordering
         self.table.horizontalHeader().setSectionsMovable(True)
@@ -219,6 +215,12 @@ class BomGui(QDialog):
 
         # Connect cell change signal
         self.table.cellChanged.connect(self.handle_cell_change)
+
+        # Connect selection change signal for the BOM spreadsheet
+        self.table.selectionModel().selectionChanged.connect(self.on_table_selection_changed)
+
+        # Connect selection change signal for the FreeCAD tree view
+        self.selection_handler.selectionChanged.connect(self.on_selection_change)
 
     def populate_table(self, bom_data):
         self.table.setRowCount(len(bom_data))
@@ -271,14 +273,26 @@ class BomGui(QDialog):
                 item.setText("")
 
     @Slot()
-    def on_table_selection_changed(self):
-        selected_items = self.table.selectedItems()
-        if selected_items:
-            row = selected_items[0].row()
+    def on_table_selection_changed(self, selected, deselected):
+        # Handle selection change in the BOM spreadsheet
+        if selected.indexes():
+            row = selected.indexes()[0].row()
             item = self.bom_data[row]
             obj = item['Object']
             FreeCADGui.Selection.clearSelection()
             FreeCADGui.Selection.addSelection(obj)
+
+    @Slot()
+    def on_selection_change(self):
+        # Handle selection change in the FreeCAD tree view
+        selected_objects = FreeCADGui.Selection.getSelection()
+        if selected_objects:
+            for obj in selected_objects:
+                for index, item in enumerate(self.bom_data):
+                    if item['Object'] == obj:
+                        self.table.selectRow(index)
+                        break
+
 
     def restore_default_order(self):
         self.table.setColumnCount(0)
@@ -312,13 +326,12 @@ class BomGui(QDialog):
                 self.populate_table(self.bom_data)
 
     def search_bom(self, text):
-    # Get the selected search field
+        # Get the selected search field
         selected_field = self.search_field_combobox.currentText()
-    
-    # Filter the BOM data based on the search text in the selected field
+        
+        # Filter the BOM data based on the search text in the selected field
         filtered_data = [item for item in self.bom_data if text.lower() in str(item.get(selected_field, '')).lower()]
         self.populate_table(filtered_data)
-
 
 
 class SearchDialog(QDialog):
@@ -362,6 +375,10 @@ class SearchDialog(QDialog):
         case_sensitive = self.case_sensitive_check.isChecked()
         return field, value, case_sensitive
 
+
 # Run the BomMacro
 macro = BomMacro()
 macro.run()
+
+#CompoundCAD.com
+#Remote Design and Consulting
