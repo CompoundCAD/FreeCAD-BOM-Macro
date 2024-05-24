@@ -1,0 +1,367 @@
+import FreeCAD
+import FreeCADGui
+import csv
+from PySide2.QtWidgets import (
+    QDialog, QPushButton, QTableWidget, QTableWidgetItem, QMenu,
+    QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QApplication, QListWidget,
+    QListWidgetItem, QDialogButtonBox, QMessageBox, QLineEdit, QComboBox, QCheckBox, QFormLayout
+)
+from PySide2.QtCore import QObject, Signal, Slot, Qt
+
+class SelectionHandler(QObject):
+    selectionChanged = Signal()
+
+    def __init__(self):
+        super().__init__()
+        FreeCADGui.Selection.addObserver(self)
+
+    def addSelection(self, doc, obj, sub, pos):
+        self.selectionChanged.emit()
+
+    def removeSelection(self, doc, obj, sub):
+        self.selectionChanged.emit()
+
+    def setSelection(self, doc, selection):
+        self.selectionChanged.emit()
+
+class BomMacro:
+    def __init__(self):
+        self.selection_handler = SelectionHandler()
+
+    def is_valid_item(self, obj):
+        valid_types = ['Part::Feature', 'App::Part', 'App::LinkGroup']
+        return obj.TypeId in valid_types
+
+    def group_objects_by_parent(self, doc):
+        object_groups = {}
+        for obj in doc.Objects:
+            parent = None
+            if hasattr(obj, 'InList') and obj.InList:
+                parent = obj.InList[0]  # Get the first parent object
+            if parent in object_groups:
+                object_groups[parent].append(obj)
+            else:
+                object_groups[parent] = [obj]
+        return object_groups
+
+    def traverse_objects(self, obj, bom_data, level=0):
+        if self.is_valid_item(obj):
+            item = {
+                'Type': 'Assembly' if hasattr(obj, 'OutList') and obj.OutList else 'Part',
+                'Name': obj.Name,
+                'Label': obj.Label,
+                'Quantity': 1,  # Default to 1, handle actual quantity later
+                'Material': obj.Material if hasattr(obj, 'Material') else "N/A",
+                'Level': level,
+                'Object': obj  # Added reference to the FreeCAD object
+            }
+            bom_data.append(item)
+            if hasattr(obj, 'OutList'):
+                for child in obj.OutList:
+                    self.traverse_objects(child, bom_data, level + 1)
+
+    def generate_bom(self):
+        bom_data = []
+        doc = FreeCAD.ActiveDocument
+        if doc is not None:
+            object_groups = self.group_objects_by_parent(doc)
+            for parent, children in object_groups.items():
+                if parent is None:
+                    # Treat objects with no parent as top-level assembly objects
+                    for obj in children:
+                        self.traverse_objects(obj, bom_data)
+        else:
+            FreeCAD.Console.PrintMessage("No active document found.\n")
+        return bom_data
+
+    def export_bom_to_csv(self, bom_data, file_path):
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['Type', 'Name', 'Label', 'Quantity', 'Material']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for item in bom_data:
+                writer.writerow({
+                    'Type': item['Type'],
+                    'Name': item['Name'],
+                    'Label': item['Label'],
+                    'Quantity': item['Quantity'],
+                    'Material': item['Material']
+                })
+
+    def run(self):
+        bom = self.generate_bom()
+        if bom:
+            dialog = BomGui(bom, self.selection_handler)
+            if dialog.exec_():
+                print("BOM dialog closed.")
+            else:
+                print("BOM dialog canceled.")
+        else:
+            print("No BOM data generated.")
+
+class ColumnManagementDialog(QDialog):
+    def __init__(self, current_columns):
+        super(ColumnManagementDialog, self).__init__()
+        self.current_columns = current_columns
+        self.available_columns = [
+            'Type', 'Name', 'Label', 'Quantity', 'Material',
+            'Weight', 'Volume', 'Cost', 'Supplier', 'Location', 'Description'
+        ]  # Define available columns
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('Manage Columns')
+        self.setMinimumWidth(250)
+        self.setMaximumWidth(400)
+
+        # Available columns list
+        self.available_columns_list = QListWidget()
+        for column_name in self.available_columns:
+            item = QListWidgetItem(column_name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if column_name in self.current_columns else Qt.Unchecked)
+            self.available_columns_list.addItem(item)
+
+        # Buttons
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+
+        # Layout
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Select Columns to Display:"))
+        layout.addWidget(self.available_columns_list)
+        layout.addWidget(self.button_box)
+        self.setLayout(layout)
+
+    def get_selected_columns(self):
+        selected_columns = []
+        for i in range(self.available_columns_list.count()):
+            item = self.available_columns_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected_columns.append(item.text())
+        return selected_columns
+
+
+class BomGui(QDialog):
+    def __init__(self, bom_data, selection_handler, parent=None):
+        super(BomGui, self).__init__(parent)
+        self.bom_data = bom_data.copy()
+        self.selection_handler = selection_handler
+        self.default_column_order = [0, 1, 2, 3]  # Store default column order
+        self.changes_made = False  # Flag to track changes
+        self.current_columns = ['Type', 'Name', 'Label', 'Quantity', 'Material']  # Store current columns
+
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('Bill of Materials')
+        self.setGeometry(100, 100, 800, 600)
+        self.setMinimumWidth(600)
+        self.setMaximumWidth(1000)
+
+        # Search layout
+        search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search BOM")
+        self.search_edit.textChanged.connect(self.search_bom)
+        search_layout.addWidget(self.search_edit)
+
+        # Create table
+        self.table = QTableWidget(len(self.bom_data), len(self.current_columns))
+        self.table.setHorizontalHeaderLabels(self.current_columns)
+        self.populate_table(self.bom_data)
+
+        # Set context menu policy
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Create buttons
+        self.export_csv_btn = QPushButton('Export to CSV')
+        self.cancel_btn = QPushButton('Cancel')
+        self.manage_columns_btn = QPushButton('Manage Columns')  # Add manage columns button
+
+        # Inside the init_ui method of BomGui class
+        self.search_field_combobox = QComboBox()
+        self.search_field_combobox.addItems(self.current_columns)
+        search_layout.addWidget(self.search_field_combobox)
+
+        # Left side layout for buttons
+        button_layout = QVBoxLayout()
+        button_layout.addWidget(self.export_csv_btn)
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.manage_columns_btn)  # Add manage columns button to layout
+
+        # Branding
+        branding_label = QLabel("Made by Compound CAD - CompoundCAD.com")
+        branding_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+
+        # Main layout
+        main_layout = QVBoxLayout()  # Change to QVBoxLayout to align search layout on top
+        main_layout.addLayout(search_layout)  # Add search layout to the main layout
+        main_layout.addWidget(self.table)
+        main_layout.addLayout(button_layout)  # Add button layout to the main layout
+        main_layout.addWidget(branding_label)
+
+        # Set main layout
+        self.setLayout(main_layout)
+
+        # Connect button signals
+        self.export_csv_btn.clicked.connect(self.export_csv)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.manage_columns_btn.clicked.connect(self.show_column_management_dialog)  # Connect manage columns button signal
+
+        # Enable drag and drop for column reordering
+        self.table.horizontalHeader().setSectionsMovable(True)
+
+        # Connect column order change signal
+        self.table.horizontalHeader().sectionMoved.connect(self.handle_column_move)
+
+        # Connect cell change signal
+        self.table.cellChanged.connect(self.handle_cell_change)
+
+    def populate_table(self, bom_data):
+        self.table.setRowCount(len(bom_data))
+        for row, item in enumerate(bom_data):
+            for col, column_name in enumerate(self.current_columns):
+                if column_name == 'Quantity':
+                    # Calculate quantity based on the number of occurrences of the item in the BOM
+                    quantity = bom_data.count(item)
+                    self.table.setItem(row, col, QTableWidgetItem(str(quantity)))
+                else:
+                    self.table.setItem(row, col, QTableWidgetItem(item.get(column_name, '')))
+
+    def export_csv(self):
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getSaveFileName(self, "Export BOM to CSV", "", "CSV Files (*.csv)")
+        if file_path:
+            bom_macro = BomMacro()
+            bom_macro.export_bom_to_csv(self.bom_data, file_path)
+            self.accept()
+
+    def show_context_menu(self, position):
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
+        clear_action = menu.addAction("Clear")
+        action = menu.exec_(self.table.viewport().mapToGlobal(position))
+
+        if action == copy_action:
+            selected_items = self.table.selectedItems()
+            if selected_items:
+                # Group selected items by row to preserve order
+                selected_items_by_row = {}
+                for item in selected_items:
+                    row = item.row()
+                    if row not in selected_items_by_row:
+                        selected_items_by_row[row] = []
+                    selected_items_by_row[row].append(item)
+
+                # Concatenate texts from each row
+                selected_text = ""
+                for row, items in sorted(selected_items_by_row.items()):
+                    row_text = "\t".join(item.text() for item in items)
+                    selected_text += row_text + "\n"
+
+                # Copy to clipboard
+                if selected_text:
+                    QApplication.clipboard().setText(selected_text)
+        elif action == clear_action:
+            item = self.table.itemAt(position)
+            if item:
+                item.setText("")
+
+    @Slot()
+    def on_table_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            row = selected_items[0].row()
+            item = self.bom_data[row]
+            obj = item['Object']
+            FreeCADGui.Selection.clearSelection()
+            FreeCADGui.Selection.addSelection(obj)
+
+    def restore_default_order(self):
+        self.table.setColumnCount(0)
+        self.table.setRowCount(0)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(['Name', 'Label', 'Quantity', 'Material'])
+        self.populate_table(self.bom_data)
+        self.restore_order_btn.setEnabled(False)  # Disable button after restoring defaults
+        self.changes_made = False  # Reset changes flag
+
+    def handle_column_move(self, logicalIndex, oldVisualIndex, newVisualIndex):
+        # Enable the "Restore Defaults" button when column order changes are made
+        if not self.changes_made:
+            self.restore_order_btn.setEnabled(True)
+            self.changes_made = True
+
+    def handle_cell_change(self, row, column):
+        # Enable the "Restore Defaults" button when changes are made in cells
+        if not self.changes_made:
+            self.restore_order_btn.setEnabled(True)
+            self.changes_made = True
+
+    def show_column_management_dialog(self):
+        dialog = ColumnManagementDialog(self.current_columns)
+        if dialog.exec_():
+            selected_columns = dialog.get_selected_columns()
+            if selected_columns:
+                self.current_columns = selected_columns
+                self.table.setColumnCount(len(selected_columns))
+                self.table.setHorizontalHeaderLabels(selected_columns)
+                self.populate_table(self.bom_data)
+
+    def search_bom(self, text):
+    # Get the selected search field
+        selected_field = self.search_field_combobox.currentText()
+    
+    # Filter the BOM data based on the search text in the selected field
+        filtered_data = [item for item in self.bom_data if text.lower() in str(item.get(selected_field, '')).lower()]
+        self.populate_table(filtered_data)
+
+
+
+class SearchDialog(QDialog):
+    def __init__(self, parent=None):
+        super(SearchDialog, self).__init__(parent)
+        self.setWindowTitle('Advanced Search')
+        self.setGeometry(200, 200, 300, 200)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        form_layout = QFormLayout()
+        self.field_combo = QComboBox()
+        self.field_combo.addItem("Type")
+        self.field_combo.addItem("Name")
+        self.field_combo.addItem("Label")
+        self.field_combo.addItem("Quantity")
+        self.field_combo.addItem("Material")
+        form_layout.addRow(QLabel("Field:"), self.field_combo)
+
+        self.search_edit = QLineEdit()
+        form_layout.addRow(QLabel("Value:"), self.search_edit)
+
+        self.case_sensitive_check = QCheckBox("Case Sensitive")
+        form_layout.addRow(self.case_sensitive_check)
+
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+
+    def get_search_criteria(self):
+        field = self.field_combo.currentText()
+        value = self.search_edit.text()
+        case_sensitive = self.case_sensitive_check.isChecked()
+        return field, value, case_sensitive
+
+# Run the BomMacro
+macro = BomMacro()
+macro.run()
